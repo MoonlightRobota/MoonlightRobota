@@ -1,39 +1,51 @@
-from ultralytics import YOLO
+from roboflow import Roboflow
+import supervision as sv
 import cv2
+import time
 
-model = YOLO("doors.pt")  # Ensure the model file path is correct
+# Initialize Roboflow
+rf = Roboflow(api_key="rRp7y8gRWMWkvv7fSnRN")
+project = rf.workspace().project("door-window-detection-pipvh")
+model = project.version(1).model
 
-# Load class names
-with open('classes.txt') as f:
-    classes = f.read().splitlines()
+# Dictionary to map class indices to names
+index_to_class = {
+    '0': "Window",
+    '1': "Handle",
+    '2': "DoorFrame",
+    '3': "Brotha Uhhhh"
+}
 
-# Initialize webcam
+# Initialize annotators
+label_annotator = sv.LabelAnnotator()
+bounding_box_annotator = sv.BoundingBoxAnnotator()
+
+# Start video capture
 cap = cv2.VideoCapture(0)
 
 while True:
-    ret, frame = cap.read()
-    if ret:
-        # Perform object detection
-        results = model(frame)
-
-        # Clear the frame for displaying confidence scores
-
-        # Manually process and display results
-        for i, result in enumerate(results):
-            if result and len(result) >= 6:  # Check if result is non-empty and has at least 6 elements
-                conf = result[4]  # Extract the confidence score
-                cls = int(result[5])  # Extract the class index
-
-                # Display the confidence score and class
-                text = f"Class: {classes[cls]}, Confidence: {conf:.2f}"
-                cv2.putText(frame, text, (10, 30 + i * 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
-
-        # Display the frame with confidence scores
-        cv2.imshow('Confidence Scores', frame)
-
-    if cv2.waitKey(1) == ord('q'):
+    # Read a frame from the video
+    ret, image = cap.read()
+    if not ret:
+        print("Failed to capture image")
         break
 
-# Release webcam and close windows
+    # Perform prediction on the current frame
+    frame_result = model.predict(image, confidence=40, overlap=30).json()
+    labels = [index_to_class[str(item["class"])] for item in frame_result["predictions"]]
+    detections = sv.Detections.from_inference(frame_result)
+
+    # Annotate the image with labels and bounding boxes
+    annotated_image = label_annotator.annotate(scene=image, detections=detections, labels=labels)
+    annotated_image = bounding_box_annotator.annotate(scene=annotated_image, detections=detections)
+
+    # Display the annotated image
+    cv2.imshow('Annotated Image', annotated_image)
+
+    # Break the loop if 'q' is pressed
+    if cv2.waitKey(1) & 0xFF == ord('q'):
+        break
+
+# Release resources
 cap.release()
 cv2.destroyAllWindows()
